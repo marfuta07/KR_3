@@ -1,9 +1,19 @@
-import logging
-import time
-from src.config import DB_CONFIG, COUNTRIES
+import sys
+import os
+from pathlib import Path
+
+# Добавляем корневую папку в PYTHONPATH
+root_dir = Path(__file__).parent.parent
+sys.path.insert(0, str(root_dir))
+
+# Импорты
+from src.config import DB_CONFIG, DB_DSN, COUNTRIES
 from src.database import Database
 from src.api_inf import APIClient
 from src.db_manager import DBManager
+
+import logging
+import time
 
 logging.basicConfig(
     level=logging.INFO,
@@ -14,15 +24,6 @@ logger = logging.getLogger(__name__)
 
 
 def main():
-    """
-    Алгоритм работы программы при каждом запуске:
-    1. Проверка наличия таблиц в БД (если нет - создаем)
-    2. Очистка старых данных (TRUNCATE)
-    3. Получение свежих данных из API
-    4. Загрузка данных в БД
-    5. Аналитика через DBManager
-    """
-
     logger.info("=" * 60)
     logger.info("🚀 ЗАПУСК ПРОГРАММЫ СБОРА ДАННЫХ О САМОЛЕТАХ")
     logger.info("=" * 60)
@@ -30,18 +31,17 @@ def main():
     start_time = time.time()
 
     try:
-        # ===== ШАГ 1: Подготовка БД =====
+        # ШАГ 1: Подготовка БД
         logger.info("\n📌 ШАГ 1: Подготовка базы данных")
-        db = Database(DB_CONFIG)
+
+        # Пробуем подключиться через DSN строку (более надежно)
+        logger.info("Используем DSN строку для подключения...")
+        db = Database(DB_DSN)  # Используем DSN вместо словаря
         db.connect()
-
-        # Проверяем и создаем таблицы если их нет
         db.create_tables_if_not_exists()
-
-        # Очищаем старые данные (полная перезапись)
         db.clear_data()
 
-        # ===== ШАГ 2: Сбор данных из API =====
+        # ШАГ 2: Сбор данных из API
         logger.info("\n📌 ШАГ 2: Сбор данных из API")
         api_client = APIClient()
 
@@ -52,7 +52,6 @@ def main():
             country_info = api_client.get_country_coordinates(country)
 
             if country_info:
-                # Сохраняем страну в БД и получаем ее ID
                 country_id = db.insert_country(country_info)
                 countries_data[country] = {
                     'id': country_id,
@@ -62,9 +61,9 @@ def main():
             else:
                 logger.warning(f"⚠️ Пропускаем страну {country} (координаты не найдены)")
 
-            time.sleep(1)  # Задержка для соблюдения лимитов API
+            time.sleep(1)
 
-        # 2.2 Получаем данные о самолетах для каждой страны
+        # 2.2 Получаем данные о самолетах
         total_aeroplanes = 0
         for country, data in countries_data.items():
             logger.info(f"\n✈️ Поиск самолетов в воздушном пространстве {country}")
@@ -72,18 +71,15 @@ def main():
             lat = data['info']['latitude']
             lon = data['info']['longitude']
 
-            # Создаем область вокруг страны (±5 градусов)
             lat_min = lat - 5
             lat_max = lat + 5
             lon_min = lon - 5
             lon_max = lon + 5
 
-            # Получаем самолеты
             aeroplanes = api_client.get_aeroplanes_by_bounding_box(
                 lat_min, lat_max, lon_min, lon_max
             )
 
-            # Сохраняем самолеты в БД
             for aeroplane in aeroplanes:
                 aeroplane['country_id'] = data['id']
                 db.insert_aeroplane(aeroplane)
@@ -91,14 +87,13 @@ def main():
             total_aeroplanes += len(aeroplanes)
             logger.info(f"✅ Сохранено {len(aeroplanes)} самолетов для {country}")
 
-            time.sleep(1)  # Задержка для соблюдения лимитов API
+            time.sleep(1)
 
-        # Закрываем соединение с БД для записи
         db.disconnect()
 
-        # ===== ШАГ 3: Аналитика данных =====
+        # ШАГ 3: Аналитика
         logger.info("\n📌 ШАГ 3: Анализ данных через DBManager")
-        db_manager = DBManager(DB_CONFIG)
+        db_manager = DBManager(DB_CONFIG)  # Для DBManager используем словарь
         db_manager.connect()
 
         # 3.1 Страны и количество самолетов
@@ -119,7 +114,7 @@ def main():
         avg_speed = db_manager.get_avg_speed()
         logger.info(f"\n📊 СРЕДНЯЯ СКОРОСТЬ: {avg_speed:.2f} м/с")
 
-        # 3.4 Самолеты со скоростью выше средней (первые 5)
+        # 3.4 Самолеты со скоростью выше средней
         logger.info("\n📊 САМОЛЕТЫ СО СКОРОСТЬЮ ВЫШЕ СРЕДНЕЙ (первые 5):")
         fast_planes = db_manager.get_aeroplanes_with_higher_speed()
         for plane in fast_planes[:5]:
@@ -127,7 +122,7 @@ def main():
                         f"Скорость: {plane.get('velocity', 'N/A')} м/с")
 
         # 3.5 Поиск по ключевому слову
-        keyword = "AFL"  # Аэрофлот
+        keyword = "AFL"
         logger.info(f"\n📊 САМОЛЕТЫ С КЛЮЧЕВЫМ СЛОВОМ '{keyword}':")
         keyword_planes = db_manager.get_aeroplanes_with_keyword(keyword)
         for plane in keyword_planes[:5]:
@@ -137,7 +132,6 @@ def main():
 
         db_manager.disconnect()
 
-        # ===== ИТОГИ =====
         elapsed_time = time.time() - start_time
         logger.info("\n" + "=" * 60)
         logger.info("✅ ПРОГРАММА УСПЕШНО ЗАВЕРШЕНА")
@@ -147,6 +141,8 @@ def main():
 
     except Exception as e:
         logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА: {e}")
+        import traceback
+        traceback.print_exc()
         raise
 
 

@@ -1,6 +1,6 @@
 import psycopg2
 import logging
-from typing import Dict, Any
+from typing import Dict, List, Any
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 class Database:
     """Класс для управления БД: создание, очистка, загрузка данных"""
 
-    def __init__(self, db_config: Dict[str, str]):
+    def __init__(self, db_config):
         self.db_config = db_config
         self.connection = None
         self.cursor = None
@@ -17,11 +17,45 @@ class Database:
     def connect(self):
         """Установка соединения с БД"""
         try:
-            self.connection = psycopg2.connect(**self.db_config)
+            # Проверяем, что передано (словарь или строка DSN)
+            if isinstance(self.db_config, dict):
+                # Если словарь, пробуем подключиться через DSN строку
+                logger.info("Подключение через DSN строку (из словаря)")
+
+                # Собираем DSN вручную
+                dsn = (
+                    f"dbname={self.db_config.get('dbname', 'aviation_db')} "
+                    f"user={self.db_config.get('user', 'postgres')} "
+                    f"password={self.db_config.get('password', '')} "
+                    f"host={self.db_config.get('host', 'localhost')} "
+                    f"port={self.db_config.get('port', '5432')} "
+                    f"client_encoding=utf8"
+                )
+
+                # Очищаем строку от лишних пробелов
+                dsn = ' '.join(dsn.split())
+                logger.info(
+                    f"Подключение к: dbname={self.db_config.get('dbname')} user={self.db_config.get('user')} host={self.db_config.get('host')} port={self.db_config.get('port')}")
+
+                self.connection = psycopg2.connect(dsn)
+
+            elif isinstance(self.db_config, str):
+                # Если уже строка DSN
+                logger.info("Подключение через DSN строку")
+                self.connection = psycopg2.connect(self.db_config)
+            else:
+                raise ValueError("db_config должен быть словарем или строкой DSN")
+
             self.cursor = self.connection.cursor()
             logger.info("✅ Подключение к БД установлено")
+
         except Exception as e:
             logger.error(f"❌ Ошибка подключения к БД: {e}")
+            logger.error(f"Тип db_config: {type(self.db_config)}")
+            if isinstance(self.db_config, dict):
+                safe_config = self.db_config.copy()
+                safe_config['password'] = '***'
+                logger.error(f"Параметры: {safe_config}")
             raise
 
     def disconnect(self):
@@ -33,14 +67,10 @@ class Database:
             logger.info("🔌 Соединение с БД закрыто")
 
     def create_tables_if_not_exists(self):
-        """
-        Создает таблицы, если они не существуют
-        Вызывается при каждом запуске программы
-        """
+        """Создает таблицы, если они не существуют"""
         try:
             logger.info("📋 Проверка наличия таблиц...")
 
-            # Таблица стран
             self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS countries (
                     id SERIAL PRIMARY KEY,
@@ -52,7 +82,6 @@ class Database:
                 )
             """)
 
-            # Таблица самолетов
             self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS aeroplanes (
                     id SERIAL PRIMARY KEY,
@@ -78,7 +107,6 @@ class Database:
                 )
             """)
 
-            # Индексы для оптимизации
             self.cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_aeroplanes_country_id 
                 ON aeroplanes(country_id)
@@ -105,21 +133,13 @@ class Database:
             raise
 
     def clear_data(self):
-        """
-        Очищает все данные из таблиц
-        Вызывается при каждом запуске для полной перезаписи
-        """
+        """Очищает все данные из таблиц"""
         try:
             logger.info("🗑️ Очистка старых данных...")
 
-            # Отключаем проверку внешних ключей
             self.cursor.execute("SET CONSTRAINTS ALL DEFERRED")
-
-            # Очищаем таблицы (сначала aeroplanes, потом countries)
             self.cursor.execute("TRUNCATE TABLE aeroplanes CASCADE")
             self.cursor.execute("TRUNCATE TABLE countries CASCADE")
-
-            # Включаем проверку обратно
             self.cursor.execute("SET CONSTRAINTS ALL IMMEDIATE")
 
             self.connection.commit()
