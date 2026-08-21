@@ -1,5 +1,6 @@
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from src.interfaces import DataAnalyzer
 from typing import List, Dict, Any
 import logging
 
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 """
 
 
-class DBManager:
+class DBManager(DataAnalyzer):
     """Класс для аналитики данных в БД"""
 
     def __init__(self, db_config: Dict[str, str]):

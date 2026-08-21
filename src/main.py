@@ -1,5 +1,4 @@
 import sys
-import os
 from pathlib import Path
 
 # Добавляем корневую папку в PYTHONPATH
@@ -11,6 +10,7 @@ from src.config import DB_CONFIG, DB_DSN, COUNTRIES
 from src.database import Database
 from src.api_inf import APIClient
 from src.db_manager import DBManager
+from src.interfaces import DataStorage, DataSource, DataAnalyzer
 
 import logging
 import time
@@ -23,7 +23,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def main():
+def main(storage: DataStorage, source: DataSource, analyzer: DataAnalyzer):
+    """
+    Главная функция программы.
+
+    Args:
+        storage: Хранилище данных (Database)
+        source: Источник данных (APIClient)
+        analyzer: Анализатор данных (DBManager)
+    """
     logger.info("=" * 60)
     logger.info("🚀 ЗАПУСК ПРОГРАММЫ СБОРА ДАННЫХ О САМОЛЕТАХ")
     logger.info("=" * 60)
@@ -33,26 +41,21 @@ def main():
     try:
         # ШАГ 1: Подготовка БД
         logger.info("\n📌 ШАГ 1: Подготовка базы данных")
-
-        # Пробуем подключиться через DSN строку (более надежно)
-        logger.info("Используем DSN строку для подключения...")
-        db = Database(DB_DSN)  # Используем DSN вместо словаря
-        db.connect()
-        db.create_tables_if_not_exists()
-        db.clear_data()
+        storage.connect()
+        storage.create_tables_if_not_exists()
+        storage.clear_data()
 
         # ШАГ 2: Сбор данных из API
         logger.info("\n📌 ШАГ 2: Сбор данных из API")
-        api_client = APIClient()
 
         # 2.1 Получаем координаты стран
         countries_data = {}
         for country in COUNTRIES:
             logger.info(f"\n📍 Обработка страны: {country}")
-            country_info = api_client.get_country_coordinates(country)
+            country_info = source.get_country_coordinates(country)
 
             if country_info:
-                country_id = db.insert_country(country_info)
+                country_id = storage.save_country(country_info)
                 countries_data[country] = {
                     'id': country_id,
                     'info': country_info
@@ -71,66 +74,72 @@ def main():
             lat = data['info']['latitude']
             lon = data['info']['longitude']
 
-            lat_min = lat - 5
-            lat_max = lat + 5
-            lon_min = lon - 5
-            lon_max = lon + 5
+            # Увеличиваем область для больших стран
+            if country in ['Russia', 'China']:
+                lat_min = lat - 15
+                lat_max = lat + 15
+                lon_min = lon - 20
+                lon_max = lon + 20
+            else:
+                lat_min = lat - 5
+                lat_max = lat + 5
+                lon_min = lon - 5
+                lon_max = lon + 5
 
-            aeroplanes = api_client.get_aeroplanes_by_bounding_box(
+            aeroplanes = source.get_aeroplanes_in_area(
                 lat_min, lat_max, lon_min, lon_max
             )
 
             for aeroplane in aeroplanes:
                 aeroplane['country_id'] = data['id']
-                db.insert_aeroplane(aeroplane)
+                storage.save_aeroplane(aeroplane)
 
             total_aeroplanes += len(aeroplanes)
             logger.info(f"✅ Сохранено {len(aeroplanes)} самолетов для {country}")
 
             time.sleep(1)
 
-        db.disconnect()
+        storage.disconnect()
 
         # ШАГ 3: Аналитика
         logger.info("\n📌 ШАГ 3: Анализ данных через DBManager")
-        db_manager = DBManager(DB_CONFIG)  # Для DBManager используем словарь
-        db_manager.connect()
+        analyzer.connect()
 
         # 3.1 Страны и количество самолетов
         logger.info("\n📊 СТРАНЫ И КОЛИЧЕСТВО САМОЛЕТОВ:")
-        countries_stats = db_manager.get_countries_and_aeroplanes_count()
+        countries_stats = analyzer.get_countries_and_aeroplanes_count()
         for item in countries_stats:
             logger.info(f"  • {item['country_name']}: {item['aeroplanes_count']} самолетов")
 
         # 3.2 Все самолеты (первые 5)
         logger.info("\n📊 ВСЕ САМОЛЕТЫ (первые 5):")
-        aeroplanes = db_manager.get_all_aeroplanes()
+        aeroplanes = analyzer.get_all_aeroplanes()
         for plane in aeroplanes[:5]:
             logger.info(f"  • {plane.get('callsign', 'N/A')} | "
                         f"Скорость: {plane.get('velocity', 'N/A')} м/с | "
                         f"{plane.get('country_name', 'N/A')}")
 
         # 3.3 Средняя скорость
-        avg_speed = db_manager.get_avg_speed()
+        avg_speed = analyzer.get_avg_speed()
         logger.info(f"\n📊 СРЕДНЯЯ СКОРОСТЬ: {avg_speed:.2f} м/с")
 
         # 3.4 Самолеты со скоростью выше средней
         logger.info("\n📊 САМОЛЕТЫ СО СКОРОСТЬЮ ВЫШЕ СРЕДНЕЙ (первые 5):")
-        fast_planes = db_manager.get_aeroplanes_with_higher_speed()
+        fast_planes = analyzer.get_aeroplanes_with_higher_speed()
         for plane in fast_planes[:5]:
             logger.info(f"  • {plane.get('callsign', 'N/A')} | "
                         f"Скорость: {plane.get('velocity', 'N/A')} м/с")
 
         # 3.5 Поиск по ключевому слову
-        keyword = "AFL"
+        keyword = "UAL"
         logger.info(f"\n📊 САМОЛЕТЫ С КЛЮЧЕВЫМ СЛОВОМ '{keyword}':")
-        keyword_planes = db_manager.get_aeroplanes_with_keyword(keyword)
+        keyword_planes = analyzer.get_aeroplanes_with_keyword(keyword)
         for plane in keyword_planes[:5]:
             logger.info(f"  • {plane.get('callsign', 'N/A')} | "
                         f"Страна: {plane.get('country_name', 'N/A')} | "
                         f"Скорость: {plane.get('velocity', 'N/A')} м/с")
 
-        db_manager.disconnect()
+        analyzer.disconnect()
 
         elapsed_time = time.time() - start_time
         logger.info("\n" + "=" * 60)
@@ -147,4 +156,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # Создаем конкретные реализации (Dependency Injection)
+    storage = Database(DB_DSN)  # Используем DSN для подключения
+    source = APIClient()
+    analyzer = DBManager(DB_CONFIG)
+
+    # Запускаем с внедренными зависимостями
+    main(storage, source, analyzer)

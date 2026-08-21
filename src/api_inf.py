@@ -2,6 +2,7 @@ import requests
 import time
 import logging
 from typing import List, Dict, Any, Optional
+from src.interfaces import DataSource
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 """
 
 
-class APIClient:
+class APIClient(DataSource):
     """Класс для работы с внешними API"""
 
     def __init__(self):

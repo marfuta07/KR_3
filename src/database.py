@@ -1,6 +1,6 @@
 import psycopg2
 import logging
-from typing import Dict, List, Any
+from typing import Dict, Any
 from src.interfaces import DataStorage
 
 logging.basicConfig(level=logging.INFO)
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 """
 
 
-class Database:
+class Database(DataStorage):
     """
     Класс для управления базой данных.
 
@@ -33,7 +33,7 @@ class Database:
         self.connection = None
         self.cursor = None
 
-    def connect(self):
+    def connect(self)->None:
         """Установка соединения с БД"""
         try:
             # Проверяем, что передано (словарь или строка DSN)
@@ -77,7 +77,7 @@ class Database:
                 logger.error(f"Параметры: {safe_config}")
             raise
 
-    def disconnect(self):
+    def disconnect(self)->None:
         """Закрытие соединения"""
         if self.cursor:
             self.cursor.close()
@@ -85,7 +85,7 @@ class Database:
             self.connection.close()
             logger.info("🔌 Соединение с БД закрыто")
 
-    def create_tables_if_not_exists(self):
+    def create_tables_if_not_exists(self)->None:
         """Создает таблицы, если они не существуют"""
         try:
             logger.info("📋 Проверка наличия таблиц...")
@@ -151,7 +151,7 @@ class Database:
             logger.error(f"❌ Ошибка создания таблиц: {e}")
             raise
 
-    def clear_data(self):
+    def clear_data(self)->None:
         """Очищает все данные из таблиц"""
         try:
             logger.info("🗑️ Очистка старых данных...")
