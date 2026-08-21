@@ -5,7 +5,6 @@ from pathlib import Path
 root_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(root_dir))
 
-# Импорты
 from src.config import DB_CONFIG, DB_DSN, COUNTRIES
 from src.database import Database
 from src.api_inf import APIClient
@@ -25,12 +24,12 @@ logger = logging.getLogger(__name__)
 
 def main(storage: DataStorage, source: DataSource, analyzer: DataAnalyzer):
     """
-    Главная функция программы.
+    Главная функция с Dependency Injection.
 
     Args:
-        storage: Хранилище данных (Database)
-        source: Источник данных (APIClient)
-        analyzer: Анализатор данных (DBManager)
+        storage: Хранилище данных (реализует DataStorage)
+        source: Источник данных (реализует DataSource)
+        analyzer: Анализатор данных (реализует DataAnalyzer)
     """
     logger.info("=" * 60)
     logger.info("🚀 ЗАПУСК ПРОГРАММЫ СБОРА ДАННЫХ О САМОЛЕТАХ")
@@ -42,8 +41,8 @@ def main(storage: DataStorage, source: DataSource, analyzer: DataAnalyzer):
         # ШАГ 1: Подготовка БД
         logger.info("\n📌 ШАГ 1: Подготовка базы данных")
         storage.connect()
-        storage.create_tables_if_not_exists()
-        storage.clear_data()
+        storage.create_tables()
+        storage.clear_all()
 
         # ШАГ 2: Сбор данных из API
         logger.info("\n📌 ШАГ 2: Сбор данных из API")
@@ -62,7 +61,7 @@ def main(storage: DataStorage, source: DataSource, analyzer: DataAnalyzer):
                 }
                 logger.info(f"✅ Страна {country} сохранена с ID {country_id}")
             else:
-                logger.warning(f"⚠️ Пропускаем страну {country} (координаты не найдены)")
+                logger.warning(f"⚠️ Пропускаем страну {country}")
 
             time.sleep(1)
 
@@ -75,11 +74,12 @@ def main(storage: DataStorage, source: DataSource, analyzer: DataAnalyzer):
             lon = data['info']['longitude']
 
             # Увеличиваем область для больших стран
-            if country in ['Russia', 'China']:
-                lat_min = lat - 15
-                lat_max = lat + 15
-                lon_min = lon - 20
-                lon_max = lon + 20
+            if country in ['Russia', 'China', 'Canada', 'Australia', 'Brazil']:
+                lat_min = lat - 10
+                lat_max = lat + 10
+                lon_min = lon - 15
+                lon_max = lon + 15
+                logger.info(f"📏 Используем увеличенную область для {country}")
             else:
                 lat_min = lat - 5
                 lat_max = lat + 5
@@ -114,30 +114,46 @@ def main(storage: DataStorage, source: DataSource, analyzer: DataAnalyzer):
         # 3.2 Все самолеты (первые 5)
         logger.info("\n📊 ВСЕ САМОЛЕТЫ (первые 5):")
         aeroplanes = analyzer.get_all_aeroplanes()
-        for plane in aeroplanes[:5]:
-            logger.info(f"  • {plane.get('callsign', 'N/A')} | "
-                        f"Скорость: {plane.get('velocity', 'N/A')} м/с | "
-                        f"{plane.get('country_name', 'N/A')}")
+        if aeroplanes:
+            for plane in aeroplanes[:5]:
+                logger.info(f"  • {plane.get('callsign', 'N/A'):<10} | "
+                            f"Скорость: {plane.get('velocity', 'N/A'):>6} м/с | "
+                            f"{plane.get('country_name', 'N/A')}")
+        else:
+            logger.info("  • Нет данных о самолетах")
 
         # 3.3 Средняя скорость
         avg_speed = analyzer.get_avg_speed()
-        logger.info(f"\n📊 СРЕДНЯЯ СКОРОСТЬ: {avg_speed:.2f} м/с")
+        logger.info(f"\n📊 СРЕДНЯЯ СКОРОСТЬ: {avg_speed:.2f} м/с ({avg_speed * 3.6:.2f} км/ч)")
 
         # 3.4 Самолеты со скоростью выше средней
         logger.info("\n📊 САМОЛЕТЫ СО СКОРОСТЬЮ ВЫШЕ СРЕДНЕЙ (первые 5):")
         fast_planes = analyzer.get_aeroplanes_with_higher_speed()
-        for plane in fast_planes[:5]:
-            logger.info(f"  • {plane.get('callsign', 'N/A')} | "
-                        f"Скорость: {plane.get('velocity', 'N/A')} м/с")
+        if fast_planes:
+            for plane in fast_planes[:5]:
+                logger.info(f"  • {plane.get('callsign', 'N/A'):<10} | "
+                            f"Скорость: {plane.get('velocity', 'N/A'):>6} м/с | "
+                            f"{plane.get('country_name', 'N/A')}")
+        else:
+            logger.info("  • Нет самолетов со скоростью выше средней")
 
         # 3.5 Поиск по ключевому слову
-        keyword = "UAL"
-        logger.info(f"\n📊 САМОЛЕТЫ С КЛЮЧЕВЫМ СЛОВОМ '{keyword}':")
-        keyword_planes = analyzer.get_aeroplanes_with_keyword(keyword)
-        for plane in keyword_planes[:5]:
-            logger.info(f"  • {plane.get('callsign', 'N/A')} | "
-                        f"Страна: {plane.get('country_name', 'N/A')} | "
-                        f"Скорость: {plane.get('velocity', 'N/A')} м/с")
+        keywords_to_try = ['UAL', 'AFL', 'CCA', 'DLH', 'AFR', 'BAW', 'THY']
+        found_keywords = False
+        for keyword in keywords_to_try:
+            keyword_planes = analyzer.get_aeroplanes_with_keyword(keyword)
+            if keyword_planes:
+                if not found_keywords:
+                    logger.info("\n📊 ПОИСК ПО КЛЮЧЕВЫМ СЛОВАМ:")
+                    found_keywords = True
+                logger.info(f"\n  🔍 Ключевое слово '{keyword}': найдено {len(keyword_planes)} самолетов")
+                for plane in keyword_planes[:3]:
+                    logger.info(f"    • {plane.get('callsign', 'N/A'):<10} | "
+                                f"Страна: {plane.get('country_name', 'N/A'):<15} | "
+                                f"Скорость: {plane.get('velocity', 'N/A')} м/с")
+
+        if not found_keywords:
+            logger.info("\n📊 ПОИСК ПО КЛЮЧЕВЫМ СЛОВАМ: ничего не найдено")
 
         analyzer.disconnect()
 
@@ -157,7 +173,7 @@ def main(storage: DataStorage, source: DataSource, analyzer: DataAnalyzer):
 
 if __name__ == "__main__":
     # Создаем конкретные реализации (Dependency Injection)
-    storage = Database(DB_DSN)  # Используем DSN для подключения
+    storage = Database(DB_DSN)
     source = APIClient()
     analyzer = DBManager(DB_CONFIG)
 

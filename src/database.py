@@ -1,94 +1,61 @@
-import psycopg2
-import logging
-from typing import Dict, Any
-from src.interfaces import DataStorage
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-
 """
 Модуль для работы с базой данных PostgreSQL.
 
-Содержит класс Database для управления подключением,
-созданием таблиц и загрузкой данных.
+Содержит класс Database, реализующий интерфейс DataStorage.
 """
+
+import psycopg2
+import logging
+from typing import Dict, List, Any, Optional
+from src.interfaces import DataStorage
+
+logger = logging.getLogger(__name__)
 
 
 class Database(DataStorage):
     """
-    Класс для управления базой данных.
+    Реализация DataStorage для PostgreSQL.
 
-    Отвечает за подключение к БД, создание таблиц,
+    Отвечает за подключение, создание таблиц,
     очистку данных и вставку записей.
-
-    Attributes:
-        db_config (Dict[str, str]): Параметры подключения к БД
-        connection: Объект подключения к PostgreSQL
-        cursor: Курсор для выполнения запросов
     """
 
     def __init__(self, db_config):
+        """
+        Инициализация объекта Database.
+
+        Args:
+            db_config: DSN строка или словарь с параметрами подключения
+        """
         self.db_config = db_config
         self.connection = None
         self.cursor = None
 
-    def connect(self)->None:
-        """Установка соединения с БД"""
+    def connect(self) -> None:
+        """Установка соединения с базой данных."""
         try:
-            # Проверяем, что передано (словарь или строка DSN)
-            if isinstance(self.db_config, dict):
-                # Если словарь, пробуем подключиться через DSN строку
-                logger.info("Подключение через DSN строку (из словаря)")
-
-                # Собираем DSN вручную
-                dsn = (
-                    f"dbname={self.db_config.get('dbname', 'aviation_db')} "
-                    f"user={self.db_config.get('user', 'postgres')} "
-                    f"password={self.db_config.get('password', '')} "
-                    f"host={self.db_config.get('host', 'localhost')} "
-                    f"port={self.db_config.get('port', '5432')} "
-                    f"client_encoding=utf8"
-                )
-
-                # Очищаем строку от лишних пробелов
-                dsn = ' '.join(dsn.split())
-                logger.info(
-                    f"Подключение к: dbname={self.db_config.get('dbname')} user={self.db_config.get('user')} host={self.db_config.get('host')} port={self.db_config.get('port')}")
-
-                self.connection = psycopg2.connect(dsn)
-
-            elif isinstance(self.db_config, str):
-                # Если уже строка DSN
-                logger.info("Подключение через DSN строку")
+            if isinstance(self.db_config, str):
                 self.connection = psycopg2.connect(self.db_config)
             else:
-                raise ValueError("db_config должен быть словарем или строкой DSN")
-
+                self.connection = psycopg2.connect(**self.db_config)
             self.cursor = self.connection.cursor()
             logger.info("✅ Подключение к БД установлено")
-
         except Exception as e:
             logger.error(f"❌ Ошибка подключения к БД: {e}")
-            logger.error(f"Тип db_config: {type(self.db_config)}")
-            if isinstance(self.db_config, dict):
-                safe_config = self.db_config.copy()
-                safe_config['password'] = '***'
-                logger.error(f"Параметры: {safe_config}")
             raise
 
-    def disconnect(self)->None:
-        """Закрытие соединения"""
+    def disconnect(self) -> None:
+        """Закрытие соединения с базой данных."""
         if self.cursor:
             self.cursor.close()
         if self.connection:
             self.connection.close()
             logger.info("🔌 Соединение с БД закрыто")
 
-    def create_tables_if_not_exists(self)->None:
-        """Создает таблицы, если они не существуют"""
+    def create_tables(self) -> None:
+        """Создание таблиц, если они не существуют."""
         try:
-            logger.info("📋 Проверка наличия таблиц...")
+            logger.info("📋 Создание таблиц...")
 
             self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS countries (
@@ -126,6 +93,7 @@ class Database(DataStorage):
                 )
             """)
 
+            # Создаем индексы
             self.cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_aeroplanes_country_id 
                 ON aeroplanes(country_id)
@@ -144,33 +112,36 @@ class Database(DataStorage):
             """)
 
             self.connection.commit()
-            logger.info("✅ Таблицы проверены/созданы успешно")
+            logger.info("✅ Таблицы созданы/проверены")
 
         except Exception as e:
             self.connection.rollback()
             logger.error(f"❌ Ошибка создания таблиц: {e}")
             raise
 
-    def clear_data(self)->None:
-        """Очищает все данные из таблиц"""
+    def clear_all(self) -> None:
+        """Очистка всех данных в таблицах."""
         try:
             logger.info("🗑️ Очистка старых данных...")
-
-            self.cursor.execute("SET CONSTRAINTS ALL DEFERRED")
             self.cursor.execute("TRUNCATE TABLE aeroplanes CASCADE")
             self.cursor.execute("TRUNCATE TABLE countries CASCADE")
-            self.cursor.execute("SET CONSTRAINTS ALL IMMEDIATE")
-
             self.connection.commit()
-            logger.info("✅ Старые данные удалены")
-
+            logger.info("✅ Данные очищены")
         except Exception as e:
             self.connection.rollback()
             logger.error(f"❌ Ошибка очистки данных: {e}")
             raise
 
-    def insert_country(self, country_data: Dict[str, Any]) -> int:
-        """Вставка данных о стране"""
+    def save_country(self, country_data: Dict[str, Any]) -> int:
+        """
+        Сохранение данных о стране.
+
+        Args:
+            country_data: Данные о стране
+
+        Returns:
+            int: ID сохраненной страны
+        """
         try:
             self.cursor.execute("""
                 INSERT INTO countries (name, country_code, latitude, longitude)
@@ -187,11 +158,16 @@ class Database(DataStorage):
             return country_id
         except Exception as e:
             self.connection.rollback()
-            logger.error(f"❌ Ошибка вставки страны {country_data.get('name')}: {e}")
+            logger.error(f"❌ Ошибка сохранения страны: {e}")
             raise
 
-    def insert_aeroplane(self, aeroplane_data: Dict[str, Any]):
-        """Вставка данных о самолете"""
+    def save_aeroplane(self, aeroplane_data: Dict[str, Any]) -> None:
+        """
+        Сохранение данных о самолете.
+
+        Args:
+            aeroplane_data: Данные о самолете
+        """
         try:
             self.cursor.execute("""
                 INSERT INTO aeroplanes (
@@ -225,5 +201,72 @@ class Database(DataStorage):
             self.connection.commit()
         except Exception as e:
             self.connection.rollback()
-            logger.error(f"❌ Ошибка вставки самолета {aeroplane_data.get('icao24')}: {e}")
+            logger.error(f"❌ Ошибка сохранения самолета: {e}")
+            raise
+
+    def get_countries(self) -> List[Dict[str, Any]]:
+        """
+        Получение списка всех стран.
+
+        Returns:
+            List[Dict[str, Any]]: Список стран
+        """
+        try:
+            self.cursor.execute("""
+                SELECT id, name, country_code, latitude, longitude, created_at
+                FROM countries
+                ORDER BY name
+            """)
+            result = self.cursor.fetchall()
+            columns = ['id', 'name', 'country_code', 'latitude', 'longitude', 'created_at']
+            return [dict(zip(columns, row)) for row in result]
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения стран: {e}")
+            raise
+
+    def get_aeroplanes(self, country_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Получение списка самолетов (опционально по стране).
+
+        Args:
+            country_id: ID страны для фильтрации
+
+        Returns:
+            List[Dict[str, Any]]: Список самолетов
+        """
+        try:
+            if country_id:
+                self.cursor.execute("""
+                    SELECT 
+                        id, icao24, callsign, country_id, origin_country,
+                        time_position, last_contact, longitude, latitude,
+                        baro_altitude, on_ground, velocity, true_track,
+                        vertical_rate, sensors, geo_altitude, squawk,
+                        spi, position_source, created_at
+                    FROM aeroplanes
+                    WHERE country_id = %s
+                    ORDER BY created_at DESC
+                """, (country_id,))
+            else:
+                self.cursor.execute("""
+                    SELECT 
+                        id, icao24, callsign, country_id, origin_country,
+                        time_position, last_contact, longitude, latitude,
+                        baro_altitude, on_ground, velocity, true_track,
+                        vertical_rate, sensors, geo_altitude, squawk,
+                        spi, position_source, created_at
+                    FROM aeroplanes
+                    ORDER BY created_at DESC
+                    LIMIT 1000
+                """)
+
+            result = self.cursor.fetchall()
+            columns = ['id', 'icao24', 'callsign', 'country_id', 'origin_country',
+                       'time_position', 'last_contact', 'longitude', 'latitude',
+                       'baro_altitude', 'on_ground', 'velocity', 'true_track',
+                       'vertical_rate', 'sensors', 'geo_altitude', 'squawk',
+                       'spi', 'position_source', 'created_at']
+            return [dict(zip(columns, row)) for row in result]
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения самолетов: {e}")
             raise
