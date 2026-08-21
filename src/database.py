@@ -1,6 +1,7 @@
 import psycopg2
 import logging
 from typing import Dict, List, Any
+from src.interfaces import DataStorage
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
