@@ -7,6 +7,14 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+"""
+Модуль для аналитики данных.
+
+Содержит класс DBManager для выполнения запросов
+и получения статистики по данным.
+"""
+
+
 class DBManager:
     """Класс для аналитики данных в БД"""
 

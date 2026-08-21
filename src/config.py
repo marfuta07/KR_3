@@ -48,5 +48,15 @@ COUNTRIES = [
     'United States',
     'Germany',
     'France',
-    'China'
+    'China',
+    'United Kingdom',
+    'Japan',
+    'Canada',
+    'Australia',
+    'India',
+    'Brazil',
+    'Italy',
+    'Spain',
+    'South Korea',
+    'Mexico'
 ]

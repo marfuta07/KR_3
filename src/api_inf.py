@@ -7,6 +7,14 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+"""
+Модуль для работы с внешними API.
+
+Содержит класс APIClient для получения данных
+из OpenSky Network и Nominatim API.
+"""
+
+
 class APIClient:
     """Класс для работы с внешними API"""
 

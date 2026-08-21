@@ -6,8 +6,26 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+"""
+Модуль для работы с базой данных PostgreSQL.
+
+Содержит класс Database для управления подключением,
+созданием таблиц и загрузкой данных.
+"""
+
+
 class Database:
-    """Класс для управления БД: создание, очистка, загрузка данных"""
+    """
+    Класс для управления базой данных.
+
+    Отвечает за подключение к БД, создание таблиц,
+    очистку данных и вставку записей.
+
+    Attributes:
+        db_config (Dict[str, str]): Параметры подключения к БД
+        connection: Объект подключения к PostgreSQL
+        cursor: Курсор для выполнения запросов
+    """
 
     def __init__(self, db_config):
         self.db_config = db_config
